@@ -1,0 +1,4 @@
+# Projekt demonstracyjny - strona nie powinna trafiac do wyszukiwarek.
+# Po wdrozeniu dla prawdziwego klienta zamien "Disallow: /" na "Allow: /".
+User-agent: *
+Disallow: /
