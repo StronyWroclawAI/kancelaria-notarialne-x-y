@@ -404,7 +404,8 @@ textarea.cmsp-json{min-height:150px;font:12px/1.4 Consolas,Menlo,monospace}
    WERSJA DEMONSTRACYJNA / PORTFOLIO:
    • dane z panelu zapisują się wyłącznie w przeglądarce osoby edytującej
      (IndexedDB, awaryjnie localStorage) — inni odwiedzający ich nie zobaczą,
-   • login i hasło do panelu są zapisane w tym pliku (login: admin, hasło: notariusz).
+   • login i hasło nie są zapisane jawnie — w kodzie jest tylko ich skrót SHA-256;
+     to nie zastępuje logowania po stronie serwera.
    Wersja produkcyjna wymaga zapisu po stronie serwera i prawdziwego logowania.
    Kolory marki (z logo, opcja 4): główny #2B2523, akcent #A65E3A
    (w tekście #8A4526), jasny akcent #D79A73, tło #F5EFE8.
@@ -428,7 +429,7 @@ const SEC = (title, intro) => ({ on: true, title, intro: intro || L3('', '', '')
 
 const DEFAULTS = {
   v: 3,
-  auth: { login: 'admin', pass: 'notariusz' },
+  auth: { u: 'e3c00f8444d122947b8f704e8fa035d87398336baedd8697d171e3a48f3fed2c', h: 'ac0acd75ece3bdcb5b7609146917f801b2d0798f2e4f98f2e3528584d3c3cb72' },
   firm: { name: 'Kancelaria notarialne X&Y' },
   hero: {
     eyebrow: L3('Kancelaria notarialna · Wrocław', 'Notary office · Wrocław', 'Нотаріальна контора · Вроцлав'),
@@ -605,6 +606,28 @@ async function dbSet(v) {
   try { const db = await idb(); await new Promise((res, rej) => { const tx = db.transaction('kv', 'readwrite'); tx.objectStore('kv').put(v, 'state'); tx.oncomplete = res; tx.onerror = () => rej(tx.error); }); return true; } catch (e) { }
   try { localStorage.setItem(DBN, JSON.stringify(v)); return true; } catch (e) { return false; }
 }
+
+/* SHA-256 (czysty JS, działa także w ramce z piaskownicą i z pliku na dysku).
+   Login i hasło nie są zapisane jawnie — w danych jest tylko ich skrót. */
+const SHA_K = (() => { const k = [], pr = []; for (let n = 2; pr.length < 64; n++) if (pr.every(p => n % p)) pr.push(n); pr.forEach(p => k.push(Math.floor((Math.cbrt(p) % 1) * 4294967296) | 0)); return k; })();
+const SHA_H0 = (() => { const h = [], pr = []; for (let n = 2; pr.length < 8; n++) if (pr.every(p => n % p)) pr.push(n); pr.forEach(p => h.push(Math.floor((Math.sqrt(p) % 1) * 4294967296) | 0)); return h; })();
+function sha256(str) {
+  const b = new TextEncoder().encode(str), l = b.length, n = ((l + 72) >> 6) << 6, d = new Uint8Array(n); d.set(b); d[l] = 0x80;
+  const v = new DataView(d.buffer); v.setUint32(n - 4, l * 8); v.setUint32(n - 8, Math.floor(l / 536870912));
+  const w = new Int32Array(64), r = (x, k) => (x >>> k) | (x << (32 - k)); let H = SHA_H0.slice();
+  for (let o = 0; o < n; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = v.getUint32(o + i * 4);
+    for (let i = 16; i < 64; i++) { const x = w[i - 15], y = w[i - 2]; w[i] = (w[i - 16] + (r(x, 7) ^ r(x, 18) ^ (x >>> 3)) + w[i - 7] + (r(y, 17) ^ r(y, 19) ^ (y >>> 10))) | 0; }
+    let [a, b1, c, d1, e, f, g, h] = H;
+    for (let i = 0; i < 64; i++) { const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + SHA_K[i] + w[i]) | 0, t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b1) ^ (a & c) ^ (b1 & c))) | 0; h = g; g = f; f = e; e = (d1 + t1) | 0; d1 = c; c = b1; b1 = a; a = (t1 + t2) | 0; }
+    H = [a, b1, c, d1, e, f, g, h].map((x, i) => (x + H[i]) | 0);
+  }
+  return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+}
+const authU = l => sha256('kn-xy|u|' + String(l).trim().toLowerCase());
+const authP = p => sha256('kn-xy|p|' + String(p).trim());
+/* dane z wcześniejszych wersji (jawne hasło) lub z importu → wracamy do domyślnych danych logowania */
+function normAuth() { if (!S.auth || !S.auth.u || !S.auth.h || 'pass' in S.auth || 'login' in S.auth) S.auth = clone(DEFAULTS.auth); }
 /* scalanie: zapisane dane nadpisują początkowe, ale nowe pola z kodu nie znikają */
 function merge(def, sav) {
   if (Array.isArray(def)) return Array.isArray(sav) ? sav : def;
@@ -977,11 +1000,10 @@ function modal(inner, label, narrow) {
 function updateLock() { const l = $('#lock'); l.textContent = logged() ? 'Panel' : '🔒'; l.setAttribute('aria-label', logged() ? 'Otwórz panel administratora' : 'Panel administratora — logowanie'); }
 function adminEntry() { if (logged()) openPanel(); else openLogin(); }
 function openLogin() {
-  const m = modal('<h2>Panel administratora</h2><form><div class="cmsp-f"><label class="cmsp-l" for="cmsp-lg">Login</label><input class="cmsp-in" id="cmsp-lg" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></div><div class="cmsp-f"><label class="cmsp-l" for="cmsp-pw">Hasło</label><input class="cmsp-in" id="cmsp-pw" type="password" autocomplete="current-password" autocapitalize="none"></div><p class="cmsp-err" role="alert"></p><div class="cmsp-mf"><button class="cmsp-btn cmsp-pri" type="submit">Zaloguj</button><button class="cmsp-btn" type="button" data-x>Anuluj</button></div>'
-    + '<p class="cmsp-hint">Wersja demonstracyjna · login admin, hasło ' + (S.auth.pass === DEFAULTS.auth.pass ? 'notariusz' : 'zmienione w Ustawieniach panelu') + '</p></form>', 'Logowanie do panelu administratora', true);
+  const m = modal('<h2>Panel administratora</h2><form><div class="cmsp-f"><label class="cmsp-l" for="cmsp-lg">Login</label><input class="cmsp-in" id="cmsp-lg" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"></div><div class="cmsp-f"><label class="cmsp-l" for="cmsp-pw">Hasło</label><input class="cmsp-in" id="cmsp-pw" type="password" autocomplete="current-password" autocapitalize="none"></div><p class="cmsp-err" role="alert"></p><div class="cmsp-mf"><button class="cmsp-btn cmsp-pri" type="submit">Zaloguj</button><button class="cmsp-btn" type="button" data-x>Anuluj</button></div></form>', 'Logowanie do panelu administratora', true);
   $('[data-x]', m.el).onclick = m.close;
   onSubmit($('form', m.el), () => {
-    if ($('#cmsp-lg').value.trim().toLowerCase() === S.auth.login && $('#cmsp-pw').value.trim() === S.auth.pass) { try { sessionStorage.setItem('kn_admin', '1'); } catch (er) { } CM.mem = 1; m.close(); updateLock(); openPanel(); }
+    if (authU($('#cmsp-lg').value) === S.auth.u && authP($('#cmsp-pw').value) === S.auth.h) { try { sessionStorage.setItem('kn_admin', '1'); } catch (er) { } CM.mem = 1; m.close(); updateLock(); openPanel(); }
     else { $('.cmsp-err', m.el).textContent = 'Nieprawidłowy login lub hasło.'; $('#cmsp-pw').select(); }
   });
 }
@@ -1159,13 +1181,13 @@ function sectionsBlock() {
 /* --- ustawienia: hasło --- */
 function passBlock() {
   const el = document.createElement('div'); el.className = 'cmsp-box';
-  el.innerHTML = '<h3>Zmiana hasła do panelu</h3><form style="max-width:420px" novalidate>' + [['o', 'Obecne hasło', 'current-password'], ['n', 'Nowe hasło', 'new-password'], ['r', 'Powtórz nowe hasło', 'new-password']].map(x => '<div class="cmsp-f"><label class="cmsp-l" for="cmsp-pw-' + x[0] + '">' + x[1] + '</label><input class="cmsp-in" type="password" id="cmsp-pw-' + x[0] + '" autocomplete="' + x[2] + '"></div>').join('') + '<p class="cmsp-err" role="alert"></p><button class="cmsp-btn cmsp-pri" type="submit">Zmień hasło</button><p class="cmsp-hint">Login: ' + esc(S.auth.login) + '. Nowe hasło zapisuje się razem z danymi w tej przeglądarce (wersja demonstracyjna).</p></form>';
+  el.innerHTML = '<h3>Zmiana hasła do panelu</h3><form style="max-width:420px" novalidate>' + [['o', 'Obecne hasło', 'current-password'], ['n', 'Nowe hasło', 'new-password'], ['r', 'Powtórz nowe hasło', 'new-password']].map(x => '<div class="cmsp-f"><label class="cmsp-l" for="cmsp-pw-' + x[0] + '">' + x[1] + '</label><input class="cmsp-in" type="password" id="cmsp-pw-' + x[0] + '" autocomplete="' + x[2] + '"></div>').join('') + '<p class="cmsp-err" role="alert"></p><button class="cmsp-btn cmsp-pri" type="submit">Zmień hasło</button><p class="cmsp-hint">Nowe hasło zapisuje się razem z danymi w tej przeglądarce (wersja demonstracyjna).</p></form>';
   onSubmit($('form', el), () => {
     const v = k => $('#cmsp-pw-' + k).value.trim(), er = $('.cmsp-err', el);
-    if (v('o') !== S.auth.pass) er.textContent = 'Obecne hasło jest nieprawidłowe.';
+    if (authP(v('o')) !== S.auth.h) er.textContent = 'Obecne hasło jest nieprawidłowe.';
     else if (v('n').length < 4) er.textContent = 'Nowe hasło musi mieć co najmniej 4 znaki.';
     else if (v('n') !== v('r')) er.textContent = 'Nowe hasła nie są takie same.';
-    else { S.auth.pass = v('n'); er.textContent = ''; $('form', el).reset(); changed(); toast('Hasło zostało zmienione.'); }
+    else { S.auth.h = authP(v('n')); er.textContent = ''; $('form', el).reset(); changed(); toast('Hasło zostało zmienione.'); }
   });
   return el;
 }
@@ -1181,7 +1203,7 @@ function backupBlock() {
     const b = e.target.closest('[data-b]'); if (!b) return; const a = b.dataset.b;
     if (a === 'copy') { const ta = $('#cmsp-ex', el); ta.select(); const done = () => toast('Skopiowano do schowka.'); if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(ta.value).then(done, () => { document.execCommand('copy'); done(); }); else { document.execCommand('copy'); done(); } }
     if (a === 'dl') { const u = URL.createObjectURL(new Blob([dump()], { type: 'application/json' })), l = document.createElement('a'); l.href = u; l.download = 'kancelaria-xy-kopia-' + today() + '.json'; document.body.appendChild(l); l.click(); l.remove(); setTimeout(() => URL.revokeObjectURL(u), 1000); toast('Pobrano plik kopii.'); }
-    if (a === 'imp') { const er = $('.cmsp-err', el); let j; try { j = JSON.parse($('#cmsp-im', el).value); } catch (x) { er.textContent = 'To nie jest poprawny plik kopii (błąd formatu JSON).'; return; } if (!j || j.app !== DBN || !j.data || !j.data.sections || !j.data.hours) { er.textContent = 'To nie jest kopia zapasowa z tego panelu.'; return; } S = merge(clone(DEFAULTS), j.data); toast('Zaimportowano kopię. Zmiany są już na stronie.'); changed(); renderPage(); }
+    if (a === 'imp') { const er = $('.cmsp-err', el); let j; try { j = JSON.parse($('#cmsp-im', el).value); } catch (x) { er.textContent = 'To nie jest poprawny plik kopii (błąd formatu JSON).'; return; } if (!j || j.app !== DBN || !j.data || !j.data.sections || !j.data.hours) { er.textContent = 'To nie jest kopia zapasowa z tego panelu.'; return; } S = merge(clone(DEFAULTS), j.data); normAuth(); toast('Zaimportowano kopię. Zmiany są już na stronie.'); changed(); renderPage(); }
     if (a === 'reset') { stage++; if (stage === 1) { b.textContent = 'Na pewno?'; b.dataset.armed = '1'; } else if (stage === 2) b.textContent = 'Tak, usuń moje zmiany'; else { const auth = S.auth; S = clone(DEFAULTS); S.auth = auth; toast('Przywrócono treści początkowe.'); changed(); renderPage(); return; } clearTimeout(CM.rt); CM.rt = setTimeout(() => { if (b.isConnected) { stage = 0; b.textContent = 'Przywróć treści początkowe'; delete b.dataset.armed; } }, 3500); }
   });
   $('#cmsp-imf', el).onchange = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => { $('#cmsp-im', el).value = r.result; toast('Wczytano plik — kliknij „Importuj”.'); }; r.readAsText(f); };
@@ -1243,6 +1265,7 @@ function viewOnSite(id) { closePanel(); if (location.hash === '#' + id) onHash()
 (async function () {
   const saved = await dbGet();
   if (saved && saved.v === DEFAULTS.v) S = merge(clone(DEFAULTS), saved);
+  normAuth();
   renderSite(); onHash(true); updateLock();
 })();
 

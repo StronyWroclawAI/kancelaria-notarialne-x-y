@@ -49,7 +49,8 @@ W projekcie Pages otwórz **Custom domains → Set up a custom domain** i podaj 
 
 ## Ważne przed publikacją dla prawdziwego klienta
 
-- Panel jest w wersji demonstracyjnej: login `admin`, hasło `notariusz` są zapisane w kodzie, a zmiany z panelu zapisują się tylko w przeglądarce osoby edytującej. Inni odwiedzający ich nie zobaczą.
+- Dane logowania do panelu przekazuję osobno — nie ma ich w plikach ani w oknie logowania. W kodzie jest tylko ich skrót SHA-256, co nie zastępuje logowania po stronie serwera.
+- Zmiany z panelu zapisują się tylko w przeglądarce osoby edytującej. Inni odwiedzający ich nie zobaczą.
 - Żeby zmiana z panelu trafiła na opublikowaną stronę, trzeba ją wpisać do danych początkowych w `index.html` (sekcja „1. DANE POCZĄTKOWE”) i wysłać plik ponownie.
 - Podmień dane przykładowe: adres, zespół, godziny otwarcia, telefon i e-mail.
 - W `robots.txt` zamień `Disallow: /` na `Allow: /`.
